@@ -2,6 +2,8 @@
 
 > 你的专属心理支持伙伴，随时倾听，温柔陪伴。
 
+项目直达：https://github.com/gitveg/Emotional-support-AI/settings/pages
+
 ## 功能特色
 
 - **温柔专业的 AI 咨询师** —— "心语"以同理心为核心，擅长情绪支持与认知行为疗法
