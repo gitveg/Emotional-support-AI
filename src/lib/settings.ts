@@ -8,8 +8,8 @@ export interface AISettings {
 
 export const DEFAULT_SETTINGS: AISettings = {
   apiKey: "",
-  baseURL: "https://api.openai.com/v1",
-  model: "gpt-4o-mini",
+  baseURL: "https://api.deepseek.com",
+  model: "deepseek-chat",
 };
 
 export function loadSettings(): AISettings {
@@ -37,26 +37,30 @@ export function isConfigured(settings: AISettings): boolean {
   return settings.apiKey.trim().length > 0;
 }
 
-/** 常用服务商预设 */
+/** 常用服务商预设，models 有值时展示为下拉选择器 */
 export const PROVIDER_PRESETS = [
-  {
-    label: "OpenAI",
-    baseURL: "https://api.openai.com/v1",
-    model: "gpt-4o-mini",
-  },
   {
     label: "DeepSeek",
     baseURL: "https://api.deepseek.com",
     model: "deepseek-chat",
+    models: ["deepseek-chat", "deepseek-reasoner"],
+  },
+  {
+    label: "OpenAI",
+    baseURL: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+    models: ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
   },
   {
     label: "月之暗面 (Kimi)",
     baseURL: "https://api.moonshot.cn/v1",
     model: "moonshot-v1-8k",
+    models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
   },
   {
     label: "智谱 AI",
     baseURL: "https://open.bigmodel.cn/api/paas/v4",
     model: "glm-4",
+    models: ["glm-4", "glm-4-flash", "glm-4-air"],
   },
-] as const;
+];

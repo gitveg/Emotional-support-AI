@@ -27,6 +27,9 @@ export default function SettingsPanel({
   const [saved, setSaved] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
 
+  // 当前匹配的服务商预设（用于决定是否渲染模型下拉）
+  const activePreset = PROVIDER_PRESETS.find((p) => p.baseURL === form.baseURL) ?? null;
+
   useEffect(() => {
     if (open) {
       setForm(loadSettings());
@@ -48,7 +51,7 @@ export default function SettingsPanel({
     setForm((prev) => ({
       ...prev,
       baseURL: preset.baseURL,
-      model: preset.model,
+      model: preset.model, // 切换服务商时重置为该服务商的默认模型
     }));
     setShowPresets(false);
   };
@@ -195,15 +198,37 @@ export default function SettingsPanel({
                   <label className="text-xs font-medium text-slate-600">
                     模型名称
                   </label>
-                  <input
-                    type="text"
-                    value={form.model}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, model: e.target.value }))
-                    }
-                    placeholder="gpt-4o-mini"
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:border-sage-300 focus:bg-white transition-colors"
-                  />
+
+                  {activePreset ? (
+                    /* 有预设模型列表时：渲染标签式选择器 */
+                    <div className="flex flex-wrap gap-2">
+                      {activePreset.models.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setForm((p) => ({ ...p, model: m }))}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all duration-150 ${
+                            form.model === m
+                              ? "bg-sage-400 border-sage-400 text-white shadow-sm"
+                              : "bg-slate-50 border-slate-200 text-slate-500 hover:border-sage-300 hover:text-slate-700"
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    /* 自定义服务商：自由文本输入 */
+                    <input
+                      type="text"
+                      value={form.model}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, model: e.target.value }))
+                      }
+                      placeholder="输入模型名称"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:border-sage-300 focus:bg-white transition-colors"
+                    />
+                  )}
                 </div>
 
                 {/* 提示 */}

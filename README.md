@@ -2,7 +2,7 @@
 
 > 你的专属心理支持伙伴，随时倾听，温柔陪伴。
 
-项目直达：https://github.com/gitveg/Emotional-support-AI/settings/pages
+项目直达：https://gitveg.github.io/Emotional-support-AI/
 
 ## 功能特色
 
