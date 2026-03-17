@@ -1,18 +1,20 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Settings, Sparkles, AlertTriangle } from "lucide-react";
+import { Settings, Sparkles, AlertTriangle, History } from "lucide-react";
 
 interface HeaderProps {
   isTyping?: boolean;
   isConfigured?: boolean;
   onSettingsClick?: () => void;
+  onHistoryClick?: () => void;
 }
 
 export default function Header({
   isTyping = false,
   isConfigured = false,
   onSettingsClick,
+  onHistoryClick,
 }: HeaderProps) {
   return (
     <motion.header
@@ -71,6 +73,15 @@ export default function Header({
           <Sparkles className="w-3.5 h-3.5 text-sage-400" />
           <span className="text-xs text-sage-600 font-medium">心理疗愈 AI</span>
         </div>
+
+        {/* 历史对话按钮 */}
+        <button
+          onClick={onHistoryClick}
+          title="历史对话"
+          className="w-9 h-9 rounded-xl bg-sage-50 hover:bg-sage-100 border border-sage-100 flex items-center justify-center text-sage-500 hover:text-sage-700 transition-all duration-200"
+        >
+          <History className="w-4 h-4" />
+        </button>
 
         {/* 设置按钮 */}
         <button

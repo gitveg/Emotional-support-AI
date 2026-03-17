@@ -8,25 +8,30 @@ import Header from "@/components/Header";
 import ChatWindow from "@/components/ChatWindow";
 import ChatInput from "@/components/ChatInput";
 import SettingsPanel from "@/components/SettingsPanel";
+import ConversationSidebar from "@/components/ConversationSidebar";
 import { Message } from "@/types";
 import { SYSTEM_PROMPT } from "@/lib/prompts";
+import { AISettings, loadSettings, isConfigured } from "@/lib/settings";
 import {
-  AISettings,
-  loadSettings,
-  isConfigured,
-} from "@/lib/settings";
+  Conversation,
+  loadConversations,
+  saveConversations,
+  upsertConversation,
+  deleteConversation,
+  loadActiveId,
+  saveActiveId,
+  newConversationId,
+  generateTitle,
+} from "@/lib/history";
 
-function generateId() {
+function generateMsgId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 /* 背景装饰 */
 function BackgroundDecorations() {
   return (
-    <div
-      className="fixed inset-0 pointer-events-none overflow-hidden"
-      aria-hidden
-    >
+    <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden>
       <div className="absolute inset-0 bg-gradient-to-br from-sage-50 via-white to-blush-50" />
       <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-lavender-100/40 blur-[80px]" />
       <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] rounded-full bg-sage-100/50 blur-[80px]" />
@@ -35,10 +40,7 @@ function BackgroundDecorations() {
       <div className="float-2 absolute top-[20%] right-[8%] w-2 h-2 rounded-full bg-lavender-200/70" />
       <div className="float-3 absolute bottom-[25%] right-[12%] w-4 h-4 rounded-full bg-blush-200/50" />
       <div className="float-1 absolute bottom-[15%] left-[15%] w-2.5 h-2.5 rounded-full bg-sage-300/40" />
-      <svg
-        className="absolute top-0 left-0 w-full h-full opacity-[0.025]"
-        xmlns="http://www.w3.org/2000/svg"
-      >
+      <svg className="absolute top-0 left-0 w-full h-full opacity-[0.025]" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
             <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#5eb192" strokeWidth="0.5" />
@@ -55,41 +57,144 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [error, setError] = useState<string | null>(null);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const [settings, setSettings] = useState<AISettings>({
     apiKey: "",
-    baseURL: "https://api.openai.com/v1",
-    model: "gpt-4o-mini",
+    baseURL: "https://api.deepseek.com",
+    model: "deepseek-chat",
   });
+
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConvId, setActiveConvId] = useState<string>("");
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingContentRef = useRef("");
 
-  /* 初始化：从 localStorage 读取设置 */
+  // ─── 初始化：从 localStorage 恢复历史 ──────────────────
+
   useEffect(() => {
     const stored = loadSettings();
     setSettings(stored);
-    /* 首次未配置时自动打开设置面板 */
-    if (!isConfigured(stored)) {
-      setSettingsOpen(true);
+    if (!isConfigured(stored)) setSettingsOpen(true);
+
+    const convs = loadConversations();
+    setConversations(convs);
+
+    // 恢复上次活跃的对话
+    const savedId = loadActiveId();
+    const target = convs.find((c) => c.id === savedId) ?? convs[0];
+    if (target) {
+      setActiveConvId(target.id);
+      setMessages(
+        target.messages.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }))
+      );
+    } else {
+      // 全新用户，初始化一条空对话
+      const id = newConversationId();
+      setActiveConvId(id);
     }
   }, []);
 
-  /* 监听话题建议点击 */
+  // ─── 话题建议点击 ───────────────────────────────────────
+
   useEffect(() => {
     const handler = (e: CustomEvent<string>) => {
       if (!isLoading) sendMessage(e.detail);
     };
     window.addEventListener("suggestion-click", handler as EventListener);
-    return () =>
-      window.removeEventListener("suggestion-click", handler as EventListener);
+    return () => window.removeEventListener("suggestion-click", handler as EventListener);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, settings]);
+  }, [isLoading, settings, activeConvId, messages]);
+
+  // ─── 持久化：messages 变化时自动保存 ──────────────────
+
+  const persistMessages = useCallback(
+    (msgs: Message[], convId: string) => {
+      if (msgs.length === 0) return;
+      const firstUser = msgs.find((m) => m.role === "user");
+      const title = firstUser ? generateTitle(firstUser.content) : "新对话";
+      const now = new Date().toISOString();
+
+      const updated: Conversation = {
+        id: convId,
+        title,
+        messages: msgs,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      setConversations((prev) => {
+        const existing = prev.find((c) => c.id === convId);
+        const merged: Conversation = {
+          ...updated,
+          createdAt: existing?.createdAt ?? now,
+        };
+        const next = upsertConversation(prev, merged);
+        saveConversations(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  // ─── 新建对话 ───────────────────────────────────────────
+
+  const handleNewConversation = useCallback(() => {
+    const id = newConversationId();
+    setActiveConvId(id);
+    setMessages([]);
+    setStreamingContent("");
+    setError(null);
+    saveActiveId(id);
+  }, []);
+
+  // ─── 切换对话 ───────────────────────────────────────────
+
+  const handleSelectConversation = useCallback((id: string) => {
+    const conv = conversations.find((c) => c.id === id);
+    if (!conv) return;
+    setActiveConvId(id);
+    setMessages(conv.messages.map((m) => ({ ...m, timestamp: new Date(m.timestamp) })));
+    setStreamingContent("");
+    setError(null);
+    saveActiveId(id);
+  }, [conversations]);
+
+  // ─── 删除对话 ───────────────────────────────────────────
+
+  const handleDeleteConversation = useCallback(
+    (id: string) => {
+      setConversations((prev) => {
+        const next = deleteConversation(prev, id);
+        saveConversations(next);
+
+        // 如果删除的是当前对话，切到最新一条或新建
+        if (id === activeConvId) {
+          const remaining = next[0];
+          if (remaining) {
+            setActiveConvId(remaining.id);
+            setMessages(
+              remaining.messages.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }))
+            );
+            saveActiveId(remaining.id);
+          } else {
+            handleNewConversation();
+          }
+        }
+        return next;
+      });
+    },
+    [activeConvId, handleNewConversation]
+  );
+
+  // ─── 发送消息 ───────────────────────────────────────────
 
   const sendMessage = useCallback(
     async (content: string) => {
       if (isLoading) return;
-
       if (!isConfigured(settings)) {
         setSettingsOpen(true);
         return;
@@ -98,7 +203,7 @@ export default function Home() {
       setError(null);
 
       const userMessage: Message = {
-        id: generateId(),
+        id: generateMsgId(),
         role: "user",
         content,
         timestamp: new Date(),
@@ -115,13 +220,13 @@ export default function Home() {
       try {
         const client = new OpenAI({
           apiKey: settings.apiKey,
-          baseURL: settings.baseURL || "https://api.openai.com/v1",
+          baseURL: settings.baseURL || "https://api.deepseek.com",
           dangerouslyAllowBrowser: true,
         });
 
         const stream = await client.chat.completions.create(
           {
-            model: settings.model || "gpt-4o-mini",
+            model: settings.model || "deepseek-chat",
             messages: [
               { role: "system", content: SYSTEM_PROMPT },
               ...updatedMessages.map((m) => ({
@@ -146,26 +251,31 @@ export default function Home() {
           }
         }
 
-        /* 流式结束，写入消息列表 */
         const assistantMessage: Message = {
-          id: generateId(),
+          id: generateMsgId(),
           role: "assistant",
           content: streamingContentRef.current,
           timestamp: new Date(),
         };
-        setMessages((prev) => [...prev, assistantMessage]);
+        const finalMessages = [...updatedMessages, assistantMessage];
+        setMessages(finalMessages);
         setStreamingContent("");
         streamingContentRef.current = "";
+
+        // 自动保存到 localStorage
+        persistMessages(finalMessages, activeConvId);
       } catch (err) {
         if ((err as Error).name === "AbortError") {
           if (streamingContentRef.current) {
             const assistantMessage: Message = {
-              id: generateId(),
+              id: generateMsgId(),
               role: "assistant",
               content: streamingContentRef.current,
               timestamp: new Date(),
             };
-            setMessages((prev) => [...prev, assistantMessage]);
+            const finalMessages = [...updatedMessages, assistantMessage];
+            setMessages(finalMessages);
+            persistMessages(finalMessages, activeConvId);
           }
           setStreamingContent("");
           streamingContentRef.current = "";
@@ -176,7 +286,7 @@ export default function Home() {
           } else if (msg.includes("429")) {
             setError("请求过于频繁，请稍后再试。");
           } else if (msg.includes("network") || msg.includes("fetch")) {
-            setError("网络连接失败。如使用 OpenAI，请确认能访问 api.openai.com。");
+            setError("网络连接失败，请检查网络或 API 地址是否可访问。");
           } else {
             setError(msg || "连接 AI 服务时出现问题，请稍后再试。");
           }
@@ -187,15 +297,10 @@ export default function Home() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isLoading, messages, settings]
+    [isLoading, messages, settings, activeConvId]
   );
 
   const handleStop = () => abortControllerRef.current?.abort();
-
-  const handleSettingsSave = (newSettings: AISettings) => {
-    setSettings(newSettings);
-  };
-
   const configured = isConfigured(settings);
 
   return (
@@ -205,7 +310,17 @@ export default function Home() {
       <SettingsPanel
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onSave={handleSettingsSave}
+        onSave={setSettings}
+      />
+
+      <ConversationSidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        conversations={conversations}
+        activeId={activeConvId}
+        onSelect={handleSelectConversation}
+        onNew={handleNewConversation}
+        onDelete={handleDeleteConversation}
       />
 
       <div className="relative z-10 flex flex-col items-center justify-center min-h-screen p-3 sm:p-6">
@@ -220,9 +335,10 @@ export default function Home() {
             isTyping={isLoading}
             isConfigured={configured}
             onSettingsClick={() => setSettingsOpen(true)}
+            onHistoryClick={() => setSidebarOpen(true)}
           />
 
-          {/* 未配置时的引导提示条 */}
+          {/* 未配置提示条 */}
           <AnimatePresence>
             {!configured && !settingsOpen && (
               <motion.div
@@ -251,6 +367,7 @@ export default function Home() {
             streamingContent={streamingContent}
           />
 
+          {/* 错误提示 */}
           <AnimatePresence>
             {error && (
               <motion.div
@@ -260,19 +377,13 @@ export default function Home() {
                 className="mx-4 mb-2 px-4 py-3 rounded-xl bg-rose-50 border border-rose-100 flex items-start gap-2.5"
               >
                 <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-rose-600 flex-1 leading-snug">
-                  {error}
-                </p>
+                <p className="text-sm text-rose-600 flex-1 leading-snug">{error}</p>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
                     onClick={() => {
-                      const lastUser = [...messages]
-                        .reverse()
-                        .find((m) => m.role === "user");
+                      const lastUser = [...messages].reverse().find((m) => m.role === "user");
                       if (lastUser) {
-                        setMessages((prev) =>
-                          prev.filter((m) => m.id !== lastUser.id)
-                        );
+                        setMessages((prev) => prev.filter((m) => m.id !== lastUser.id));
                         setError(null);
                         sendMessage(lastUser.content);
                       } else {
@@ -284,10 +395,7 @@ export default function Home() {
                     <RefreshCcw className="w-3 h-3" />
                     重试
                   </button>
-                  <button
-                    onClick={() => setError(null)}
-                    className="text-rose-300 hover:text-rose-500 transition-colors"
-                  >
+                  <button onClick={() => setError(null)} className="text-rose-300 hover:text-rose-500 transition-colors">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
